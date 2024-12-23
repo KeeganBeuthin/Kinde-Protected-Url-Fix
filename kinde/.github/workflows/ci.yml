@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - renovate/*
+      - renovate/*
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ci:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "pnpm"
+
+      - name: 📦 Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🚧 Set up project
+        run: pnpm dev:prepare
+
+      - name: 💪 Test types
+        run: pnpm test:types
+
+      - name: 🛠 Build project
+        run: pnpm prepack
+
+      - name: 🛝 Build playground
+        run: pnpm dev:build
+
+      - name: 👀 Lint project
+        run: pnpm lint
+
+      - name: 🧪 Test project
+        run: pnpm test
