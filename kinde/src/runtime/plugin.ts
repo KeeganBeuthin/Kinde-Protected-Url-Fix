@@ -4,8 +4,6 @@ import type { AuthState } from './types'
 import { defineNuxtPlugin, shallowRef, useState, useRequestEvent } from '#imports'
 
 export default defineNuxtPlugin(async () => {
-  console.log('🔗 Loading locally linked @nuxtjs/kinde module')
-  
   const state = useState<AuthState>('auth', shallowRef)
   if (import.meta.server) {
     const kinde = useRequestEvent()!.context.kinde

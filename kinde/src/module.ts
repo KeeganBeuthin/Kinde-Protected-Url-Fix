@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 
-import { addServerHandler, defineNuxtModule, addPlugin, createResolver, addRouteMiddleware, addImports, addComponent, addTemplate } from '@nuxt/kit'
+import { addServerHandler, defineNuxtModule, addPlugin, createResolver, addRouteMiddleware, addImports, addComponent, addTemplate, addTypeTemplate } from '@nuxt/kit'
 import { defu } from 'defu'
 import type { CookieSerializeOptions } from 'cookie-es'
 import { join } from 'pathe'
@@ -14,11 +14,12 @@ export interface ModuleOptions {
   cookie: Partial<CookieSerializeOptions>
   middleware?: boolean
   endpoints?: {
-    callback?: string
-    login?: string
-    logout?: string
-    register?: string
-    health?: string
+    callback: string
+    login: string
+    logout: string
+    register: string
+    health: string
+    access: string
   }
   handlers?: {
     callback?: string
@@ -26,6 +27,7 @@ export interface ModuleOptions {
     logout?: string
     register?: string
     health?: string
+    access?: string
   }
   authDomain?: string
   clientId?: string
@@ -58,6 +60,7 @@ export default defineNuxtModule<ModuleOptions>({
       register: '/api/register',
       health: '/api/health',
       logout: '/api/logout',
+      access: '/api/access',
     },
     middleware: true,
     authDomain: '',
@@ -70,18 +73,58 @@ export default defineNuxtModule<ModuleOptions>({
     debug: nuxt.options.dev || nuxt.options.debug,
   }),
   async setup(options, nuxt) {
-    nuxt.options.runtimeConfig.kinde = defu(nuxt.options.runtimeConfig.kinde, {
-      password: options.password,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      cookie: options.cookie as any,
-      authDomain: options.authDomain,
-      clientId: options.clientId,
-      redirectURL: options.redirectURL,
-      logoutRedirectURL: options.logoutRedirectURL,
-      postLoginRedirectURL: options.postLoginRedirectURL,
-      clientSecret: options.clientSecret,
-      audience: options.audience,
+    console.log('📦 Module Setup - Initial Options:', {
+      hasAuthDomain: !!options.authDomain,
+      hasClientId: !!options.clientId,
+      envAuthDomain: process.env.NUXT_KINDE_AUTH_DOMAIN,
+      envClientId: process.env.NUXT_KINDE_CLIENT_ID
+    });
+
+    // Ensure environment variables are properly loaded
+    const envConfig = {
+      authDomain: process.env.NUXT_KINDE_AUTH_DOMAIN || options.authDomain,
+      clientId: process.env.NUXT_KINDE_CLIENT_ID || options.clientId,
+      clientSecret: process.env.NUXT_KINDE_CLIENT_SECRET || options.clientSecret,
+      redirectURL: process.env.NUXT_KINDE_REDIRECT_URL || options.redirectURL,
+      logoutRedirectURL: process.env.NUXT_KINDE_LOGOUT_REDIRECT_URL || options.logoutRedirectURL,
+      postLoginRedirectURL: process.env.NUXT_KINDE_POST_LOGIN_REDIRECT_URL || options.postLoginRedirectURL,
+      audience: process.env.NUXT_KINDE_AUDIENCE || options.audience,
+    }
+
+    // Set runtime config
+    nuxt.options.runtimeConfig = defu(nuxt.options.runtimeConfig, {
+      public: {
+        kinde: {
+          authDomain: envConfig.authDomain,
+          clientId: envConfig.clientId,
+          redirectURL: envConfig.redirectURL,
+          logoutRedirectURL: envConfig.logoutRedirectURL,
+          postLoginRedirectURL: envConfig.postLoginRedirectURL,
+          audience: envConfig.audience,
+        }
+      },
+      kinde: {
+        password: options.password || process.env.NUXT_KINDE_PASSWORD,
+        cookie: {
+          sameSite: String(options.cookie?.sameSite || 'lax'),
+          secure: Boolean(options.cookie?.secure),
+          httpOnly: Boolean(options.cookie?.httpOnly),
+        },
+        clientSecret: envConfig.clientSecret,
+      }
     })
+
+    console.log('📦 Module Setup - Public Config:', {
+      authDomain: nuxt.options.runtimeConfig.public.kinde.authDomain,
+      clientId: nuxt.options.runtimeConfig.public.kinde.clientId,
+      redirectURL: nuxt.options.runtimeConfig.public.kinde.redirectURL
+    });
+
+    console.log('📦 Module Setup - Private Config:', {
+      hasPassword: !!nuxt.options.runtimeConfig.kinde.password,
+      hasClientSecret: !!nuxt.options.runtimeConfig.kinde.clientSecret,
+      cookieSettings: nuxt.options.runtimeConfig.kinde.cookie
+    });
 
     addTemplate({
       filename: 'kinde-routes.config.mjs',
@@ -146,6 +189,15 @@ export default defineNuxtModule<ModuleOptions>({
         || resolver.resolve('./runtime/server/api/logout.get'),
     })
 
+    if (nuxt.options.routeRules && Object.keys(nuxt.options.routeRules).find(key => !!nuxt.options.routeRules![key].kinde)) {
+      addServerHandler({
+        route: options.endpoints!.access!,
+        handler:
+          options.handlers?.access
+          || resolver.resolve('./runtime/server/api/access.post'),
+      })
+    }
+
     // Composables
     addImports({ name: 'useAuth', as: 'useAuth', from: resolver.resolve('./runtime/composables') })
     addImports({ name: 'useKindeClient', as: 'useKindeClient', from: resolver.resolve('./runtime/composables') })
@@ -170,6 +222,28 @@ export default defineNuxtModule<ModuleOptions>({
     addComponent({
       name: 'RegisterLink',
       filePath: resolver.resolve('./runtime/components/RegisterLink'),
+    })
+
+    addTypeTemplate({
+      filename: `types/nuxt-kinde.d.ts`,
+      getContents: () => {
+        return `
+interface KindeRouteRules {
+  permissions: string[]
+  redirectUrl: string
+}
+
+declare module 'nitropack' {
+  interface NitroRouteRules {
+    kinde?: KindeRouteRules
+  }
+  interface NitroRouteConfig {
+    kinde?: KindeRouteRules
+  }
+}
+export {}
+`
+      },
     })
   },
 })
